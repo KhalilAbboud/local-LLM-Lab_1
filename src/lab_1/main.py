@@ -2,7 +2,7 @@ import streamlit as st
 import ollama
 
 MODEL = "smallthinker:3b"
-DEFAULT_SYSTEM_PROMPT = "You are a helpful and concise assistant."
+DEFAULT_SYSTEM_PROMPT = "You are a helpful and concise assistant that talks less."
 DEFAULT_OPTIONS = {
     "temperature": 0.7,
     "top_k": 40,
