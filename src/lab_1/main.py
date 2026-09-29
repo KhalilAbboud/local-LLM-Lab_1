@@ -22,104 +22,433 @@ st.set_page_config(
     layout="centered",
 )
 
+# The palette lives in .streamlit/config.toml so Streamlit themes its own
+# widgets. This stylesheet only covers what the theme cannot reach: chat
+# bubbles, the chat composer, rendered markdown, scrollbars and hover/focus
+# feedback. Every token below is defined once and reused.
 st.markdown(
     """
     <style>
+        /* ---------- design tokens ---------- */
         :root {
-            --bg: #071a2f;
-            --panel: #0d2340;
-            --panel-soft: #122d4c;
-            --line: rgba(160, 189, 255, 0.18);
+            --sidebar-bg: #0a1830;
+            --line: rgba(160, 189, 255, 0.16);
+            --line-strong: rgba(160, 189, 255, 0.32);
             --primary: #8bb4ff;
             --primary-strong: #5d8ef7;
+            --on-primary: #06152a;
             --text: #edf4ff;
-            --muted: #b8c9e6;
+            --muted: #a9bcd9;
             --bubble-user: #143a63;
             --bubble-assistant: #102b46;
-            --button: #1b3c63;
+            --code-bg: #061426;
+            --radius: 14px;
+            --shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+            --font: "Inter", "Segoe UI", system-ui, -apple-system,
+                    "Helvetica Neue", Arial, sans-serif;
+            --mono: "JetBrains Mono", "Cascadia Code", "SF Mono", Consolas,
+                    "Liberation Mono", monospace;
+            --speed: 150ms ease;
         }
 
-        html, body, [data-testid="stAppViewContainer"] {
-            background: linear-gradient(180deg, #061624 0%, #0b1d33 100%);
+        /* ---------- base typography ---------- */
+        html, body, .stApp,
+        [data-testid="stAppViewContainer"],
+        [data-testid="stMain"] {
+            font-family: var(--font);
             color: var(--text);
         }
 
+        h1, h2, h3, h4, h5, h6 {
+            color: var(--text);
+            font-weight: 650;
+            letter-spacing: -0.01em;
+        }
+
+        /* Streamlit 1.64 renders headings as .stHeading, not .stTitle. */
+        [data-testid="stHeading"] {
+            margin-bottom: 0.1rem;
+        }
+
+        .stCaption,
+        [data-testid="stCaptionContainer"] {
+            color: var(--muted);
+        }
+
+        a {
+            color: var(--primary);
+            text-decoration: none;
+            transition: color var(--speed);
+        }
+
+        a:hover {
+            color: #ffffff;
+            text-decoration: underline;
+        }
+
+        /* header rule under the title block */
+        hr,
+        [data-testid="stMarkdownContainer"] hr {
+            border: none;
+            border-top: 1px solid var(--line);
+            margin: 0.9rem 0 1rem;
+        }
+
+        /* ---------- sidebar ----------
+           Width is intentionally left to Streamlit. Forcing width/min-width/
+           max-width with !important blocks the collapse animation, which
+           leaves stSidebarCollapseButton and the collapsed-state expand
+           control both visible at the same time. */
         [data-testid="stSidebar"] {
-            background: rgba(9, 22, 38, 0.95);
+            background: var(--sidebar-bg) !important;
             border-right: 1px solid var(--line);
         }
 
-        .stApp {
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+            background: var(--sidebar-bg) !important;
+            padding: 0.9rem 0.9rem 1.4rem;
+        }
+
+        [data-testid="stSidebarHeader"] button {
+            color: var(--muted);
+            transition: color var(--speed);
+        }
+
+        [data-testid="stSidebarHeader"] button:hover {
             color: var(--text);
         }
 
-        h1, h2, h3 {
-            color: var(--text) !important;
-            letter-spacing: 0.02em;
+        [data-testid="stSidebar"] .stMarkdown,
+        [data-testid="stSidebar"] .stTextInput,
+        [data-testid="stSidebar"] .stNumberInput,
+        [data-testid="stSidebar"] .stTextArea,
+        [data-testid="stSidebar"] .stSelectbox,
+        [data-testid="stSidebar"] .stCheckbox {
+            font-size: 0.88rem;
         }
 
-        .stTitle {
-            margin-bottom: 0.25rem;
-        }
-
-        .stCaption {
-            color: var(--muted) !important;
-        }
-
-        div[data-testid="stVerticalBlock"] > div {
-            border-radius: 18px;
-        }
-
-        [data-testid="stChatMessage"] {
-            border-radius: 18px;
-            padding: 0.75rem 0.9rem;
+        /* ---------- sidebar controls ---------- */
+        [data-testid="stSidebar"] .stTextInput > div,
+        [data-testid="stSidebar"] .stTextArea > div,
+        [data-testid="stSidebar"] .stNumberInput > div,
+        [data-testid="stSidebar"] .stSlider > div,
+        [data-testid="stSidebar"] .stSelectbox > div,
+        [data-testid="stSidebar"] .stCheckbox > div {
+            border-radius: 10px;
             border: 1px solid var(--line);
-            box-shadow: none;
+            background: rgba(255, 255, 255, 0.02);
+            transition: border-color var(--speed),
+                        background var(--speed),
+                        box-shadow var(--speed);
         }
 
-        [data-testid="stChatMessage"]:has([data-testid="chatAvatarUser"]) {
-            background: rgba(20, 58, 99, 0.85);
+        [data-testid="stSidebar"] .stTextInput > div:focus-within,
+        [data-testid="stSidebar"] .stTextArea > div:focus-within,
+        [data-testid="stSidebar"] .stNumberInput > div:focus-within,
+        [data-testid="stSidebar"] .stSelectbox > div:focus-within {
+            border-color: var(--primary-strong);
+            background: rgba(93, 142, 247, 0.06);
+            box-shadow: 0 0 0 1px rgba(93, 142, 247, 0.35);
         }
 
-        [data-testid="stChatMessage"]:has([data-testid="chatAvatarAssistant"]) {
-            background: rgba(16, 43, 70, 0.9);
+        [data-testid="stSidebar"] input,
+        [data-testid="stSidebar"] textarea,
+        [data-testid="stSidebar"] .stNumberInput input {
+            background: transparent;
+            color: var(--text);
+            font-family: var(--font);
+            caret-color: var(--primary);
+            outline: none;
         }
 
-        .stTextInput > div, .stTextArea > div, .stNumberInput > div, .stSlider > div {
-            border-radius: 14px;
-            background: rgba(255,255,255,0.02);
-            border: 1px solid var(--line);
+        [data-testid="stSidebar"] input::placeholder,
+        [data-testid="stSidebar"] textarea::placeholder {
+            color: var(--muted);
+            opacity: 0.75;
         }
 
+        [data-testid="stSidebar"] .stSlider {
+            margin-top: 0.1rem;
+            margin-bottom: 0.2rem;
+        }
+
+        [data-testid="stSidebar"] .stNumberInput > div > div {
+            display: flex;
+            align-items: center;
+        }
+
+        /* Sliders are rendered by react-aria in 1.64, so the old
+           "data-baseweb" and "stBaseSlider" selectors no longer match. */
+        [data-testid="stSlider"] .react-aria-Slider {
+            margin: 0.4rem 0 0.6rem;
+        }
+
+        [data-testid="stSlider"] .react-aria-SliderTrack {
+            background: rgba(160, 189, 255, 0.18);
+            border: none;
+            border-radius: 999px;
+            height: 5px;
+            transition: background var(--speed);
+        }
+
+        [data-testid="stSlider"] .react-aria-SliderTrack:hover {
+            background: rgba(160, 189, 255, 0.28);
+        }
+
+        [data-testid="stSlider"] .react-aria-SliderThumb {
+            background: var(--primary);
+            border: 2px solid var(--sidebar-bg);
+            border-radius: 50%;
+            box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
+            transition: transform var(--speed), box-shadow var(--speed);
+        }
+
+        [data-testid="stSlider"] .react-aria-SliderThumb:hover,
+        [data-testid="stSlider"] .react-aria-SliderThumb[data-hovered] {
+            transform: scale(1.15);
+        }
+
+        [data-testid="stSlider"] .react-aria-SliderThumb[data-dragging] {
+            transform: scale(1.25);
+            box-shadow: 0 0 0 6px rgba(93, 142, 247, 0.18);
+        }
+
+        [data-testid="stSlider"] .react-aria-SliderThumb[data-focus-visible] {
+            box-shadow: 0 0 0 3px rgba(93, 142, 247, 0.55);
+        }
+
+        [data-testid="stSliderThumbValue"] {
+            background: var(--primary);
+            color: var(--on-primary);
+            font-weight: 650;
+            font-size: 0.7rem;
+            border-radius: 6px;
+        }
+
+        /* number input steppers */
+        [data-testid="stNumberInputStepUp"],
+        [data-testid="stNumberInputStepDown"] {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--muted);
+            border-radius: 6px;
+            transition: background var(--speed), color var(--speed);
+        }
+
+        [data-testid="stNumberInputStepUp"]:hover,
+        [data-testid="stNumberInputStepDown"]:hover {
+            background: var(--primary-strong);
+            color: var(--on-primary);
+        }
+
+        /* ---------- buttons ---------- */
         .stButton > button {
+            width: 100%;
             background: linear-gradient(180deg, #1d4373 0%, #173457 100%);
             color: var(--text);
-            border: 1px solid rgba(170, 199, 255, 0.2);
-            border-radius: 12px;
-            padding: 0.6rem 1rem;
+            border: 1px solid var(--line-strong);
+            border-radius: 10px;
+            padding: 0.45rem 0.8rem;
+            font-family: var(--font);
             font-weight: 600;
-            transition: all 0.2s ease;
+            box-shadow: var(--shadow);
+            transition: filter var(--speed),
+                        border-color var(--speed),
+                        transform 100ms ease;
         }
 
         .stButton > button:hover {
-            border-color: rgba(170, 199, 255, 0.45);
-            box-shadow: 0 10px 22px rgba(54, 100, 170, 0.2);
+            filter: brightness(1.2);
+            border-color: var(--primary);
         }
 
-        .stMarkdown {
-            color: var(--text);
+        .stButton > button:active {
+            transform: translateY(1px);
         }
 
-        .stSidebar .stMarkdown {
-            color: var(--text);
+        .stButton > button:focus-visible {
+            outline: 2px solid var(--primary-strong);
+            outline-offset: 2px;
         }
 
-        .stSidebar .stButton > button {
+        /* ---------- chat messages ---------- */
+        [data-testid="stChatMessage"] {
+            background: transparent;
+            border: none;
+            box-shadow: none;
+            padding: 0.15rem 0;
+        }
+
+        [data-testid="stChatMessageContent"],
+        [data-testid="stChatMessage"] > div:last-child {
+            background: var(--bubble-assistant);
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            padding: 0.65rem 0.9rem;
+            box-shadow: var(--shadow);
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        /* NOTE: the avatar test ids in Streamlit are "AvatarUser" and
+           "AvatarAssistant". The earlier "chatAvatarUser" spelling never
+           matched, which left user and assistant bubbles looking identical. */
+        [data-testid="stChatMessage"]:has([data-testid="AvatarUser"])
+            [data-testid="stChatMessageContent"],
+        [data-testid="stChatMessage"]:has([data-testid="AvatarUser"])
+            > div:last-child {
+            background: var(--bubble-user);
+            border-color: rgba(139, 180, 255, 0.28);
+            border-left: 3px solid var(--primary-strong);
+        }
+
+        /* Avatar circles are left at Streamlit's default size. */
+
+        /* ---------- rendered markdown inside replies ---------- */
+        [data-testid="stChatMessageContent"] p,
+        [data-testid="stChatMessage"] > div:last-child p {
+            line-height: 1.6;
+            margin-bottom: 0.6rem;
+        }
+
+        [data-testid="stChatMessageContent"] > *:last-child,
+        [data-testid="stChatMessage"] > div:last-child > *:last-child {
+            margin-bottom: 0;
+        }
+
+        [data-testid="stChatMessageContent"] ul,
+        [data-testid="stChatMessageContent"] ol {
+            padding-left: 1.2rem;
+            margin-bottom: 0.6rem;
+        }
+
+        [data-testid="stChatMessageContent"] li {
+            margin-bottom: 0.25rem;
+            line-height: 1.55;
+        }
+
+        [data-testid="stChatMessageContent"] blockquote {
+            border-left: 3px solid var(--primary-strong);
+            background: rgba(93, 142, 247, 0.08);
+            color: var(--muted);
+            margin: 0.5rem 0;
+            padding: 0.35rem 0.85rem;
+            border-radius: 0 8px 8px 0;
+        }
+
+        [data-testid="stChatMessageContent"] hr {
+            border-top: 1px solid var(--line);
+            margin: 0.9rem 0;
+        }
+
+        [data-testid="stChatMessageContent"] table {
+            border-collapse: collapse;
             width: 100%;
+            font-size: 0.88rem;
+            margin: 0.5rem 0;
         }
 
-        textarea, input {
-            color: var(--text) !important;
+        [data-testid="stChatMessageContent"] th,
+        [data-testid="stChatMessageContent"] td {
+            border: 1px solid var(--line);
+            padding: 0.4rem 0.65rem;
+            text-align: left;
+        }
+
+        [data-testid="stChatMessageContent"] th {
+            background: rgba(255, 255, 255, 0.05);
+            color: var(--text);
+            font-weight: 650;
+        }
+
+        [data-testid="stChatMessageContent"] tbody tr:nth-child(even) {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* code inside replies */
+        [data-testid="stChatMessageContent"] code,
+        [data-testid="stChatMessage"] > div:last-child code {
+            background: var(--code-bg);
+            color: #cfe3ff;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 0.1rem 0.35rem;
+            font-family: var(--mono);
+            font-size: 0.85em;
+        }
+
+        [data-testid="stCode"] {
+            background: var(--code-bg);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+        }
+
+        [data-testid="stCode"] code {
+            background: transparent;
+            border: none;
+            padding: 0;
+            color: #d6e6ff;
+            font-family: var(--mono);
+        }
+
+        pre {
+            background: var(--code-bg);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+        }
+
+        pre code {
+            background: transparent;
+            border: none;
+            padding: 0;
+        }
+
+        /* ---------- chat composer ----------
+           The composer is left entirely to Streamlit's native theme. It
+           already renders the mic, file-upload and send controls correctly;
+           restyling it produced a stray circular button in the pill. */
+
+        /* ---------- chrome ---------- */
+        [data-testid="stHeader"] {
+            background: transparent;
+        }
+
+        /* The scroll-to-bottom control keeps Streamlit's default shape. */
+
+        [data-testid="stSpinner"] > div > div {
+            border-top-color: var(--primary);
+        }
+
+        .stTooltip {
+            background: #0f2743;
+            border: 1px solid var(--line-strong);
+            color: var(--text);
+        }
+
+        /* ---------- scrollbars ---------- */
+        * {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(160, 189, 255, 0.28) transparent;
+        }
+
+        ::-webkit-scrollbar {
+            width: 10px;
+            height: 10px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(160, 189, 255, 0.24);
+            border: 2px solid transparent;
+            border-radius: 999px;
+            background-clip: content-box;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(160, 189, 255, 0.45);
+            background-clip: content-box;
         }
     </style>
     """,
@@ -128,6 +457,7 @@ st.markdown(
 
 st.title("SmallThinker Chatbot")
 st.caption(f"Powered locally by Ollama • {MODEL}")
+st.markdown("---")
 
 # Initialize chat history
 if "messages" not in st.session_state:

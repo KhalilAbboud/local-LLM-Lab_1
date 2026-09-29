@@ -1,0 +1,18 @@
+# Native Streamlit theme.
+# Defining the palette here (instead of forcing a dark background with CSS
+# overrides) makes every internally rendered surface -- chat input, slider
+# track and thumb, number-input steppers, code blocks, tooltips, popovers,
+# the spinner -- dark and consistent with the page.
+
+[theme]
+base = "dark"
+primaryColor = "#5d8ef7"
+backgroundColor = "#071a2f"
+secondaryBackgroundColor = "#0d2340"
+textColor = "#edf4ff"
+font = "sans serif"
+
+[server]
+# Keep the app usable on small screens instead of stretching the layout.
+headless = true
+runOnSave = true
