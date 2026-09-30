@@ -17,7 +17,7 @@ DEFAULT_OPTIONS = {
 }
 
 st.set_page_config(
-    page_title="SmallThinker Chatbot",
+    page_title="SmallThinker Chatbot test",
     page_icon="✨",
     layout="centered",
 )
