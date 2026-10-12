@@ -1,0 +1,148 @@
+"""Déploiement Streamlit du CNN du Lab_cnn_Bousmah_PyTorch.ipynb.
+
+Lancement : uv run streamlit run streamlit_cnn_fruits_bousmah.py
+Le notebook produit model_fruits.pth dans son répertoire de travail.
+"""
+from pathlib import Path
+import io
+import streamlit as st
+import torch
+from torch import nn
+from torchvision import transforms
+from PIL import Image, UnidentifiedImageError
+
+st.set_page_config(page_title="CNN Fruits | PyTorch", page_icon="🍎", layout="wide")
+DEFAULT_MODEL = Path(__file__).resolve().parent / "model_fruits.pth"
+DEFAULT_CLASSES = ["apple", "banana", "orange"]
+
+
+def device_for(choice):
+    if choice == "MPS" and torch.backends.mps.is_available():
+        return torch.device("mps")
+    if choice == "CUDA" and torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def build_model(num_classes):
+    """Architecture identique à la cellule 5 du laboratoire."""
+    return nn.Sequential(
+        nn.Conv2d(3, 32, kernel_size=3), nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),
+        nn.Conv2d(32, 32, kernel_size=3), nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),
+        nn.Conv2d(32, 32, kernel_size=3), nn.ReLU(),
+        nn.MaxPool2d(kernel_size=2),
+        nn.Flatten(),
+        nn.Linear(32 * 6 * 6, 128), nn.ReLU(),
+        nn.Linear(128, num_classes),
+    )
+
+
+@st.cache_resource(show_spinner="Chargement du CNN PyTorch…")
+def load_model(model_bytes: bytes, selected_device: str):
+    """Charger le checkpoint avec weights_only pour limiter la désérialisation.
+
+    Un checkpoint .pth doit provenir d'une source de confiance.
+    """
+    checkpoint = torch.load(io.BytesIO(model_bytes), map_location="cpu", weights_only=True)
+    if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
+        raise ValueError("Checkpoint incompatible : clé 'model_state_dict' absente.")
+    class_names = checkpoint.get("classes", DEFAULT_CLASSES)
+    image_size = tuple(checkpoint.get("image_size", (64, 64)))
+    if not isinstance(class_names, (tuple, list)) or not class_names or not all(isinstance(c, str) for c in class_names):
+        raise ValueError("Liste de classes invalide dans le checkpoint.")
+    if image_size != (64, 64):
+        raise ValueError(f"Taille d'image incompatible : {image_size}. Attendu : (64, 64).")
+    model = build_model(len(class_names))
+    model.load_state_dict(checkpoint["model_state_dict"], strict=True)
+    device = device_for(selected_device)
+    model = model.to(device).eval()
+    return model, list(class_names), image_size, device
+
+
+def predict(image: Image.Image, model: nn.Module, size, device):
+    transform = transforms.Compose([
+        transforms.Resize(size),
+        transforms.ToTensor(),
+    ])
+    tensor = transform(image.convert("RGB")).unsqueeze(0).to(device)
+    with torch.inference_mode():
+        logits = model(tensor)
+        probabilities = torch.softmax(logits, dim=1)[0].cpu().tolist()
+    return probabilities
+
+
+st.title("🍎 Classification de fruits par CNN — PyTorch")
+st.caption("Déploiement du CNN entraîné dans Lab_cnn_Bousmah_PyTorch.ipynb — inférence uniquement")
+
+with st.sidebar:
+    st.header("⚙️ Configuration")
+    device_choice = st.selectbox("Périphérique", ["Automatique", "CPU", "MPS", "CUDA"])
+    if device_choice == "Automatique":
+        device_choice = "MPS" if torch.backends.mps.is_available() else "CUDA" if torch.cuda.is_available() else "CPU"
+    model_upload = st.file_uploader("Charger un modèle (.pth) de confiance", type=["pth"], help="Checkpoint sauvegardé par le laboratoire.")
+    st.markdown("**Checkpoint attendu** : `model_fruits.pth` (généré par la cellule de sauvegarde du TP).")
+    st.info("Le modèle doit avoir été entraîné puis sauvegardé. Cette application n'effectue aucun entraînement.")
+
+model_bytes = None
+if model_upload is not None:
+    model_bytes = model_upload.getvalue()
+    source_desc = f"Fichier importé : {model_upload.name}"
+elif DEFAULT_MODEL.is_file():
+    model_bytes = DEFAULT_MODEL.read_bytes()
+    source_desc = f"Fichier local : {DEFAULT_MODEL.name}"
+else:
+    source_desc = None
+
+if model_bytes is None:
+    st.warning("Aucun modèle trouvé. Placez `model_fruits.pth` à côté de ce script ou chargez-le depuis la barre latérale.")
+    st.code('torch.save({"model_state_dict": model.state_dict(), "classes": class_names, "image_size": (64, 64)}, "model_fruits.pth")', language="python")
+    st.stop()
+
+try:
+    model, class_names, image_size, device = load_model(model_bytes, device_choice)
+except Exception as exc:
+    st.error(f"Impossible de charger le modèle : {exc}")
+    st.stop()
+
+st.success(f"Modèle chargé — {source_desc} | Périphérique : {device}")
+st.write("**Classes reconnues :** " + ", ".join(class_names))
+
+uploaded_image = st.file_uploader("Importer une image de fruit", type=["jpg", "jpeg", "png", "webp"])
+if uploaded_image is None:
+    st.info("Choisissez une image pour obtenir la prédiction du CNN.")
+    st.stop()
+
+try:
+    picture = Image.open(io.BytesIO(uploaded_image.getvalue())).convert("RGB")
+except (UnidentifiedImageError, OSError, ValueError) as exc:
+    st.error(f"Image illisible : {exc}")
+    st.stop()
+
+left, right = st.columns([1, 1], gap="large")
+with left:
+    st.subheader("Image importée")
+    st.image(picture, caption=f"Image d'origine : {picture.width} × {picture.height} pixels", use_container_width=True)
+with right:
+    st.subheader("Prédiction")
+    try:
+        probabilities = predict(picture, model, image_size, device)
+    except RuntimeError as exc:
+        st.error(f"Erreur pendant l'inférence : {exc}")
+        st.stop()
+    best_index = max(range(len(probabilities)), key=probabilities.__getitem__)
+    st.metric("Fruit prédit", class_names[best_index].capitalize())
+    st.metric("Score softmax", f"{probabilities[best_index]:.1%}")
+    st.markdown("**Probabilités par classe**")
+    for cls, p in sorted(zip(class_names, probabilities), key=lambda item: item[1], reverse=True):
+        st.write(f"{cls.capitalize()} : {p:.1%}")
+        st.progress(float(p))
+
+with st.expander("🔬 Détails techniques"):
+    st.write("Architecture : Conv2d(3→32) → ReLU → MaxPool2d → Conv2d(32→32) → ReLU → MaxPool2d → Conv2d(32→32) → ReLU → MaxPool2d → Flatten → Linear(1152→128) → ReLU → Linear(128→N).")
+    st.write("Prétraitement : Resize(64, 64), conversion RGB, ToTensor() (pixels entre 0 et 1).")
+    st.write("Sortie : logits transformés en probabilités par softmax, puis argmax pour la prédiction.")
+    st.write(f"Nombre de paramètres : {sum(p.numel() for p in model.parameters()):,}")
+
+st.caption("Projet pédagogique : les scores softmax ne sont pas des garanties de justesse. Les images hors des trois classes peuvent être mal classées.")

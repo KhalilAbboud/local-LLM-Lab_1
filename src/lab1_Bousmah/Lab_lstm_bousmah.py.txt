@@ -1,0 +1,302 @@
+# --------------------------------------------------------------
+# Lab LSTM : Prediction des prix des actions
+#
+# But: Etre capable de concevoir et réaliser une AI permettant la prédiction du cours de l'action. 
+#   (Le prix auquel s'échangent les actions sur les bourses)
+#
+# **Author : Mohammed BOUSMAH  EMSI-2026 — bousmah@gmail.com**
+# **Keywords :  streamlit yfinance dataset, PyTorch, LSTM **
+#
+#uv add torch numpy pandas yfinance streamlit matplotlib scikit-learn
+#--------------------------------------------------------------
+
+# -----------------------------
+# Imports
+# -----------------------------
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+import streamlit as st
+import matplotlib.pyplot as plt
+
+from sklearn.preprocessing import MinMaxScaler
+import torch
+from torch import nn
+from torch.utils.data import TensorDataset, DataLoader
+from datetime import date, timedelta
+
+# -----------------------------
+# Helper functions
+# -----------------------------
+
+@st.cache_data(show_spinner=True)
+def load_data(ticker, start, end):
+    data = yf.download(ticker, start=start, end=end)
+    data.dropna(inplace=True)
+    return data
+
+
+def create_sequences(data, window_size=60):
+    """
+    data: 1D numpy array of shape (n_samples,)
+    returns X of shape (n_sequences, window_size, 1) and y of shape (n_sequences,)
+    """
+    X, y = [], []
+    for i in range(window_size, len(data)):
+        X.append(data[i - window_size:i])
+        y.append(data[i])
+    X = np.array(X)
+    y = np.array(y)
+    # reshape X to (samples, timesteps, features)
+    X = np.reshape(X, (X.shape[0], X.shape[1], 1))
+    return X, y
+
+
+class StockLSTM(nn.Module):
+    """Two stacked LSTM layers, with dropout after each layer."""
+    def __init__(self, input_size=1, units=50, dropout_rate=0.2):
+        super().__init__()
+        self.lstm1 = nn.LSTM(input_size=input_size, hidden_size=units, batch_first=True)
+        self.dropout1 = nn.Dropout(dropout_rate)
+        self.lstm2 = nn.LSTM(input_size=units, hidden_size=units, batch_first=True)
+        self.dropout2 = nn.Dropout(dropout_rate)
+        self.dense = nn.Linear(units, 1)
+
+    def forward(self, x):
+        x, _ = self.lstm1(x)
+        x = self.dropout1(x)
+        x, _ = self.lstm2(x)
+        x = self.dropout2(x[:, -1, :])
+        return self.dense(x)
+
+
+def build_lstm(input_shape, units=50, dropout_rate=0.2):
+    return StockLSTM(input_size=input_shape[-1], units=units, dropout_rate=dropout_rate)
+
+
+def train_lstm(model, X_train, y_train, X_val, y_val, epochs, batch_size, device):
+    """Explicit PyTorch training loop; the chronological test set is used as validation."""
+    x_train = torch.tensor(X_train, dtype=torch.float32)
+    y_train_tensor = torch.tensor(y_train, dtype=torch.float32).reshape(-1, 1)
+    train_loader = DataLoader(TensorDataset(x_train, y_train_tensor), batch_size=batch_size, shuffle=False)
+    x_val = torch.tensor(X_val, dtype=torch.float32, device=device)
+    y_val_tensor = torch.tensor(y_val, dtype=torch.float32, device=device).reshape(-1, 1)
+    criterion = nn.MSELoss()
+    optimizer = torch.optim.Adam(model.parameters())
+    history = {"loss": [], "val_loss": []}
+
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0.0
+        total_count = 0
+        for xb, yb in train_loader:
+            xb, yb = xb.to(device), yb.to(device)
+            optimizer.zero_grad()
+            loss = criterion(model(xb), yb)
+            loss.backward()
+            optimizer.step()
+            total_loss += loss.item() * len(xb)
+            total_count += len(xb)
+
+        model.eval()
+        with torch.no_grad():
+            validation_loss = criterion(model(x_val), y_val_tensor).item()
+        history["loss"].append(total_loss / total_count)
+        history["val_loss"].append(validation_loss)
+    return history
+
+
+def predict_lstm(model, X, device):
+    model.eval()
+    with torch.no_grad():
+        x = torch.tensor(X, dtype=torch.float32, device=device)
+        return model(x).cpu().numpy()
+
+
+# -----------------------------
+# Streamlit UI
+# -----------------------------
+
+st.set_page_config(page_title="Stock Price Prediction (LSTM)", layout="wide")
+
+st.title("📈 Stock Price Prediction using LSTM")
+st.write(
+    "This app downloads historical stock data from **Yahoo Finance**, "
+    "trains a simple **PyTorch LSTM neural network** on the closing prices, "
+    "and predicts future prices."
+)
+
+# Sidebar controls
+st.sidebar.header("Configuration")
+
+default_ticker = "AAPL"
+ticker = st.sidebar.text_input("Stock Ticker (Yahoo Finance symbol)", value=default_ticker)
+
+today = date.today()
+default_start = today - timedelta(days=5 * 365)
+
+start_date = st.sidebar.date_input("Start Date", value=default_start)
+end_date = st.sidebar.date_input("End Date", value=today)
+
+window_size = st.sidebar.slider("Sequence Length (days)", min_value=20, max_value=120, value=60, step=5)
+epochs = st.sidebar.slider("Training Epochs", min_value=5, max_value=50, value=20, step=5)
+batch_size = st.sidebar.selectbox("Batch Size", options=[16, 32, 64], index=1)
+test_ratio = st.sidebar.slider("Test Ratio", min_value=0.1, max_value=0.4, value=0.2, step=0.05)
+
+future_days = st.sidebar.slider("Days to Predict Ahead", min_value=1, max_value=30, value=7)
+
+st.sidebar.markdown("---")
+st.sidebar.write("Click below to start training and prediction:")
+run_button = st.sidebar.button("🚀 Run Model")
+
+# -----------------------------
+# Main logic
+# -----------------------------
+
+if not run_button:
+    st.info("Configure the parameters in the sidebar, then click **🚀 Run Model**.")
+else:
+    if start_date >= end_date:
+        st.error("❌ Start date must be before end date.")
+    else:
+        with st.spinner("Downloading data..."):
+            data = load_data(ticker, start_date, end_date)
+
+        if data.empty:
+            st.error("No data returned. Check the ticker symbol or date range.")
+        else:
+            st.subheader(f"Raw Data for {ticker}")
+            st.dataframe(data.tail())
+
+            # Plot historical close prices
+            st.subheader("Historical Closing Price")
+            fig_hist, ax_hist = plt.subplots()
+            ax_hist.plot(data.index, data["Close"])
+            ax_hist.set_xlabel("Date")
+            ax_hist.set_ylabel("Price")
+            ax_hist.set_title(f"{ticker} Closing Price")
+            st.pyplot(fig_hist)
+
+            # Prepare data for LSTM
+            close_prices = data["Close"].values.reshape(-1, 1)
+
+            scaler = MinMaxScaler(feature_range=(0, 1))
+            # Train/test split (chronological): fit scaler on training data ONLY.
+            split_index = int(len(close_prices) * (1 - test_ratio))
+            scaler.fit(close_prices[:split_index])
+            scaled_data = scaler.transform(close_prices).flatten()
+            train_data = scaled_data[:split_index]
+            test_data = scaled_data[split_index - window_size:]  # overlap for sequences
+
+            if len(train_data) <= window_size or len(test_data) <= window_size:
+                st.error("Not enough data points for the chosen window size and test ratio. "
+                         "Try reducing the window size or using a longer date range.")
+            else:
+                # Create sequences
+                X_train, y_train = create_sequences(train_data, window_size)
+                X_test, y_test = create_sequences(test_data, window_size)
+
+                st.write(f"Training samples: {X_train.shape[0]}, Test samples: {X_test.shape[0]}")
+
+                # Build and train model
+                with st.spinner("Training LSTM model..."):
+                    device = torch.device(
+                        "mps" if torch.backends.mps.is_available()
+                        else "cuda" if torch.cuda.is_available() else "cpu"
+                    )
+                    st.write(f"PyTorch device: **{device}**")
+                    model = build_lstm(input_shape=(X_train.shape[1], 1)).to(device)
+                    history = train_lstm(
+                        model, X_train, y_train, X_test, y_test,
+                        epochs=epochs, batch_size=batch_size, device=device,
+                    )
+
+                # Plot training history
+                st.subheader("Training History (Loss)")
+                fig_loss, ax_loss = plt.subplots()
+                ax_loss.plot(history["loss"], label="Train Loss")
+                ax_loss.plot(history["val_loss"], label="Validation Loss")
+                ax_loss.set_xlabel("Epoch")
+                ax_loss.set_ylabel("Loss (MSE)")
+                ax_loss.legend()
+                st.pyplot(fig_loss)
+
+                # Predictions on test set
+                with st.spinner("Generating predictions on test data..."):
+                    test_predictions = predict_lstm(model, X_test, device)
+
+                # Inverse scaling
+                test_predictions_rescaled = scaler.inverse_transform(test_predictions)
+                y_test_rescaled = scaler.inverse_transform(y_test.reshape(-1, 1))
+
+                # Build date index for test portion
+                test_dates = data.index[split_index:]
+                if len(test_dates) != len(y_test_rescaled):
+                    # Align lengths (just in case of off-by-one)
+                    min_len = min(len(test_dates), len(y_test_rescaled))
+                    test_dates = test_dates[-min_len:]
+                    y_test_rescaled = y_test_rescaled[-min_len:]
+                    test_predictions_rescaled = test_predictions_rescaled[-min_len:]
+
+                # Plot predicted vs actual
+                st.subheader("Test Set: Actual vs Predicted Closing Price")
+                fig_pred, ax_pred = plt.subplots()
+                ax_pred.plot(test_dates, y_test_rescaled, label="Actual")
+                ax_pred.plot(test_dates, test_predictions_rescaled, label="Predicted")
+                ax_pred.set_xlabel("Date")
+                ax_pred.set_ylabel("Price")
+                ax_pred.legend()
+                st.pyplot(fig_pred)
+
+                # -----------------------------
+                # Future prediction
+                # -----------------------------
+                st.subheader(f"Predict Next {future_days} Day(s)")
+
+                last_sequence = scaled_data[-window_size:]  # last known window
+                future_predictions_scaled = []
+
+                current_seq = last_sequence.copy()
+
+                for _ in range(future_days):
+                    input_seq = current_seq.reshape(1, window_size, 1)
+                    next_pred_scaled = float(predict_lstm(model, input_seq, device)[0, 0])
+                    future_predictions_scaled.append(next_pred_scaled)
+                    # slide window
+                    current_seq = np.append(current_seq[1:], next_pred_scaled)
+
+                future_predictions_scaled = np.array(future_predictions_scaled).reshape(-1, 1)
+                future_predictions_rescaled = scaler.inverse_transform(future_predictions_scaled).flatten()
+
+                future_dates = pd.date_range(start=data.index[-1] + pd.Timedelta(days=1),
+                                             periods=future_days, freq="B")  # business days
+
+                future_df = pd.DataFrame(
+                    {"Predicted Close": future_predictions_rescaled},
+                    index=future_dates
+                )
+
+                st.write("Future Predicted Prices:")
+                st.dataframe(future_df)
+
+                # Plot last 60 days + future predictions
+                st.subheader("Last Prices + Future Predictions")
+
+                last_known_days = 60
+                last_known_data = data["Close"].tail(last_known_days)
+
+                fig_future, ax_future = plt.subplots()
+                ax_future.plot(last_known_data.index, last_known_data.values, label="Last Known Close")
+                ax_future.plot(future_df.index, future_df["Predicted Close"].values, label="Predicted Future Close")
+                ax_future.set_xlabel("Date")
+                ax_future.set_ylabel("Price")
+                ax_future.legend()
+                st.pyplot(fig_future)
+
+                st.success("Done ✅ Model trained and predictions generated.")
+
+                st.caption(
+                    "⚠️ This is an educational demo and **not** financial advice. "
+                    "Real trading requires more robust models and risk management."
+                )
