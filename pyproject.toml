@@ -8,14 +8,17 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "ipykernel>=7.4.0",
     "ipywidgets>=8.1.9",
     "matplotlib>=3.11.2",
     "numpy>=2.5.3",
     "ollama>=0.6.2",
+    "pandas>=3.0.6",
     "streamlit>=1.64.0",
     "torch>=2.14.1",
     "torcheval>=0.0.7",
     "torchmetrics>=1.9.0",
+    "torchvision>=0.29.1",
     "torchviz>=0.0.3",
 ]
 
