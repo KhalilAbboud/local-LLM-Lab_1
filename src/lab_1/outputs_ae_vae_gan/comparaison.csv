@@ -1,0 +1,4 @@
+Modèle,MSE test reconstruction,Échantillonnage prior
+AE,0.04644278304430903,Non garanti
+VAE,0.05484512023925781,Oui
+GAN,,Oui
